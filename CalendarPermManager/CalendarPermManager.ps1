@@ -44,7 +44,12 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
       <TextBlock Text="Admin UPN (optional):" VerticalAlignment="Center" Margin="0,0,6,0"/>
       <TextBox x:Name="AdminUpn" Width="260" Margin="0,0,10,0"/>
-      <CheckBox x:Name="DeviceCode" Content="Use device code" VerticalAlignment="Center" Margin="0,0,10,0" ToolTip="Fallback if the browser sign-in does not open"/>
+      <TextBlock Text="Sign-in:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+      <ComboBox x:Name="SignInMode" Width="190" SelectedIndex="0" Margin="0,0,10,0">
+        <ComboBoxItem Content="Browser (modern login)"/>
+        <ComboBoxItem Content="Windows popup (WAM)"/>
+        <ComboBoxItem Content="Device code"/>
+      </ComboBox>
       <Button x:Name="BtnConnect" Content="Connect (MFA sign-in)" Padding="12,4"/>
       <Button x:Name="BtnDisconnect" Content="Disconnect" Padding="12,4" Margin="6,0,0,0" IsEnabled="False"/>
       <TextBlock x:Name="ConnStatus" Text="Not connected" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="Bold"/>
@@ -126,7 +131,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 
 $win = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-foreach ($n in 'DeviceCode','AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
+foreach ($n in 'SignInMode','AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
                'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','DelegateBox','RightsBox','BtnAddQueue',
                'BtnImport','BtnClearQueue','QueueGrid','WhatIfBox','BtnApply','ApplyStatus','LogBox') {
     $ui[$n] = $win.FindName($n)
@@ -176,7 +181,8 @@ $script:exoRs.Open()
 function Invoke-Exo([scriptblock]$Script, [object[]]$ArgList = @()) {
     $ps = [powershell]::Create()
     $ps.Runspace = $script:exoRs
-    [void]$ps.AddScript('$ErrorActionPreference = "Stop"; ' + $Script.ToString())
+    [void]$ps.AddScript('$ErrorActionPreference = "Stop"')
+    [void]$ps.AddStatement().AddScript($Script.ToString())
     foreach ($a in $ArgList) { [void]$ps.AddArgument($a) }
     $h = $ps.BeginInvoke(); $seen = 0
     try {
@@ -217,16 +223,16 @@ $ui.BtnConnect.Add_Click({
         }
         Log 'Opening sign-in...'
         $info = Invoke-Exo {
-            param($upn, $device)
+            param($upn, $mode)
             Import-Module ExchangeOnlineManagement
             $p = @{ ShowBanner = $false }
             if ($upn) { $p.UserPrincipalName = $upn }
-            if ($device) { $p.Device = $true }
-            elseif ((Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) { $p.DisableWAM = $true }
+            if ($mode -eq 2) { $p.Device = $true }
+            elseif ($mode -eq 0 -and (Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) { $p.DisableWAM = $true }
             Connect-ExchangeOnline @p
             $c = Get-ConnectionInformation | Select-Object -First 1
             "$($c.UserPrincipalName)|$($c.TenantID)"
-        } @($ui.AdminUpn.Text.Trim(), [bool]$ui.DeviceCode.IsChecked)
+        } @($ui.AdminUpn.Text.Trim(), $ui.SignInMode.SelectedIndex)
         $u,$t = ([string]($info | Select-Object -Last 1)) -split '\|'
         $ui.ConnStatus.Text = "Connected: $u @ $t"
         $ui.BtnLoad.IsEnabled = $true; $ui.BtnDisconnect.IsEnabled = $true; $ui.BtnApply.IsEnabled = $true
@@ -236,7 +242,7 @@ $ui.BtnConnect.Add_Click({
 })
 
 $ui.BtnDisconnect.Add_Click({
-    try { Invoke-Exo { Disconnect-ExchangeOnline -Confirm:$false } | Out-Null } catch {}
+    try { Invoke-Exo { Disconnect-ExchangeOnline -Confirm:$false; Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue } | Out-Null } catch {}
     $ui.ConnStatus.Text = 'Not connected'
     $ui.BtnLoad.IsEnabled = $false; $ui.BtnDisconnect.IsEnabled = $false; $ui.BtnApply.IsEnabled = $false
     Log 'Disconnected.'
