@@ -42,14 +42,6 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 
     <!-- Connection -->
     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-      <TextBlock Text="Admin UPN (optional):" VerticalAlignment="Center" Margin="0,0,6,0"/>
-      <TextBox x:Name="AdminUpn" Width="260" Margin="0,0,10,0"/>
-      <TextBlock Text="Sign-in:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-      <ComboBox x:Name="SignInMode" Width="190" SelectedIndex="0" Margin="0,0,10,0">
-        <ComboBoxItem Content="Browser (modern login)"/>
-        <ComboBoxItem Content="Windows popup (WAM)"/>
-        <ComboBoxItem Content="Device code"/>
-      </ComboBox>
       <Button x:Name="BtnConnect" Content="Connect (MFA sign-in)" Padding="12,4"/>
       <Button x:Name="BtnDisconnect" Content="Disconnect" Padding="12,4" Margin="6,0,0,0" IsEnabled="False"/>
       <TextBlock x:Name="ConnStatus" Text="Not connected" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="Bold"/>
@@ -133,7 +125,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 
 $win = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-foreach ($n in 'SignInMode','AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
+foreach ($n in 'BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
                'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','TargetBox','RightsBox','BtnAddQueue',
                'BtnImport','BtnClearQueue','QueueGrid','WhatIfBox','BtnApply','ApplyStatus','LogBox') {
     $ui[$n] = $win.FindName($n)
@@ -214,7 +206,7 @@ $ui.BtnUncheckAll.Add_Click({ foreach ($r in $mbxTable.Rows) { $r['Selected'] = 
 $ui.BtnConnect.Add_Click({
     try {
         $ui.BtnConnect.IsEnabled = $false
-        $ui.ConnStatus.Text = 'Signing in... complete the Microsoft sign-in (browser window)'
+        $ui.ConnStatus.Text = 'Signing in... complete the Microsoft sign-in popup'
         Log 'Checking ExchangeOnlineManagement module...'
         $have = Invoke-Exo { [bool](Get-Module -ListAvailable ExchangeOnlineManagement) }
         if (-not $have) {
@@ -225,16 +217,12 @@ $ui.BtnConnect.Add_Click({
         }
         Log 'Opening sign-in...'
         $info = Invoke-Exo {
-            param($upn, $mode)
             Import-Module ExchangeOnlineManagement
-            $p = @{ ShowBanner = $false }
-            if ($upn) { $p.UserPrincipalName = $upn }
-            if ($mode -eq 2) { $p.Device = $true }
-            elseif ($mode -eq 0 -and (Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) { $p.DisableWAM = $true }
-            Connect-ExchangeOnline @p
+            # Windows account popup (WAM broker); no browser / device-code fallback.
+            Connect-ExchangeOnline -ShowBanner:$false
             $c = Get-ConnectionInformation | Select-Object -First 1
             "$($c.UserPrincipalName)|$($c.TenantID)"
-        } @($ui.AdminUpn.Text.Trim(), $ui.SignInMode.SelectedIndex)
+        }
         $u,$t = ([string]($info | Select-Object -Last 1)) -split '\|'
         $script:tenantInfo = "$u @ $t"
         $ui.ConnStatus.Text = "Connected: $u @ $t"
