@@ -75,7 +75,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
               <ComboBoxItem Content="EquipmentMailbox"/>
             </ComboBox>
             <Button x:Name="BtnLoad" Content="Load / refresh" Padding="8,3" IsEnabled="False" Margin="0,0,10,4"/>
-            <Button x:Name="BtnCheckVisible" Content="Check visible" Padding="8,3" Margin="0,0,4,4"/>
+            <CheckBox x:Name="SelectAllBox" Content="Select all (filtered)" VerticalAlignment="Center" Margin="0,0,10,4"/>
             <Button x:Name="BtnUncheckAll" Content="Uncheck all" Padding="8,3" Margin="0,0,10,4"/>
             <TextBlock x:Name="CountText" VerticalAlignment="Center" Margin="0,0,0,4"/>
           </WrapPanel>
@@ -96,16 +96,19 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
           <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
             <Button x:Name="BtnAddQueue" Content="Add checked users to queue" Padding="10,4" Margin="0,0,6,0"/>
             <Button x:Name="BtnImport" Content="Import CSV" Padding="10,4" Margin="0,0,6,0"/>
-            <Button x:Name="BtnClearQueue" Content="Clear queue" Padding="10,4"/>
+            <Button x:Name="BtnRemoveChecked" Content="Remove checked" Padding="10,4" Margin="0,0,6,0"/>
+            <Button x:Name="BtnClearQueue" Content="Clear queue" Padding="10,4" Margin="0,0,10,0"/>
+            <CheckBox x:Name="QueueSelectAll" Content="Select all" VerticalAlignment="Center"/>
           </StackPanel>
           <TextBlock Text="3. Queue (Mailbox / Delegate / AccessRights)" FontWeight="Bold" Margin="0,0,0,4"/>
         </StackPanel>
-        <DataGrid x:Name="QueueGrid" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" IsReadOnly="True">
+        <DataGrid x:Name="QueueGrid" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
           <DataGrid.Columns>
-            <DataGridTextColumn Header="Mailbox" Binding="{Binding Mailbox}" Width="*"/>
-            <DataGridTextColumn Header="Delegate" Binding="{Binding Delegate}" Width="*"/>
-            <DataGridTextColumn Header="Rights" Binding="{Binding AccessRights}" Width="110"/>
-            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*"/>
+            <DataGridCheckBoxColumn Header="" Binding="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="30"/>
+            <DataGridTextColumn Header="Mailbox" Binding="{Binding Mailbox}" IsReadOnly="True" Width="*"/>
+            <DataGridTextColumn Header="Delegate" Binding="{Binding Delegate}" IsReadOnly="True" Width="*"/>
+            <DataGridTextColumn Header="Rights" Binding="{Binding AccessRights}" IsReadOnly="True" Width="110"/>
+            <DataGridTextColumn Header="Status" Binding="{Binding Status}" IsReadOnly="True" Width="*"/>
           </DataGrid.Columns>
         </DataGrid>
       </DockPanel>
@@ -126,7 +129,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 $win = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
 foreach ($n in 'BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
-               'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','TargetBox','RightsBox','BtnAddQueue',
+               'SelectAllBox','QueueSelectAll','BtnRemoveChecked','BtnUncheckAll','CountText','MbxGrid','TargetBox','RightsBox','BtnAddQueue',
                'BtnImport','BtnClearQueue','QueueGrid','WhatIfBox','BtnApply','ApplyStatus','LogBox') {
     $ui[$n] = $win.FindName($n)
 }
@@ -141,6 +144,8 @@ $mbxTable.Columns['Selected'].DefaultValue = $false
 $ui.MbxGrid.ItemsSource = $mbxTable.DefaultView
 
 $queueTable = New-Object Data.DataTable
+[void]$queueTable.Columns.Add('Selected',[bool])
+$queueTable.Columns['Selected'].DefaultValue = $false
 foreach ($c in 'Mailbox','Delegate','AccessRights','Status') { [void]$queueTable.Columns.Add($c,[string]) }
 $ui.QueueGrid.ItemsSource = $queueTable.DefaultView
 
@@ -200,8 +205,27 @@ $ui.FilterText.Add_TextChanged({ Update-Filter })
 $ui.ActiveOnly.Add_Click({ Update-Filter })
 $ui.TypeFilter.Add_SelectionChanged({ if ($mbxTable) { Update-Filter } })
 $ui.MbxGrid.Add_CellEditEnding({ $win.Dispatcher.BeginInvoke('Background',[Action]{ Update-Filter }) | Out-Null })
-$ui.BtnCheckVisible.Add_Click({ foreach ($v in $mbxTable.DefaultView) { $v.Row['Selected'] = $true }; Update-Filter })
-$ui.BtnUncheckAll.Add_Click({ foreach ($r in $mbxTable.Rows) { $r['Selected'] = $false }; Update-Filter })
+# Checking/unchecking applies to the rows currently visible through the filter.
+$ui.SelectAllBox.Add_Click({
+    $v = [bool]$ui.SelectAllBox.IsChecked
+    foreach ($row in $mbxTable.DefaultView) { $row.Row['Selected'] = $v }
+    Update-Filter
+})
+$ui.BtnUncheckAll.Add_Click({
+    foreach ($r in $mbxTable.Rows) { $r['Selected'] = $false }
+    $ui.SelectAllBox.IsChecked = $false; Update-Filter
+})
+$ui.QueueSelectAll.Add_Click({
+    $v = [bool]$ui.QueueSelectAll.IsChecked
+    foreach ($r in $queueTable.Rows) { $r['Selected'] = $v }
+})
+$ui.BtnRemoveChecked.Add_Click({
+    $rows = @($queueTable.Select('Selected = true'))
+    if (-not $rows) { [void][Windows.MessageBox]::Show('Check the queue entries to remove first.'); return }
+    foreach ($r in $rows) { $queueTable.Rows.Remove($r) }
+    $ui.QueueSelectAll.IsChecked = $false
+    Log "Removed $($rows.Count) entr$(if($rows.Count -eq 1){'y'}else{'ies'}) from the queue."
+})
 
 $ui.BtnConnect.Add_Click({
     try {
@@ -227,19 +251,25 @@ $ui.BtnConnect.Add_Click({
         $script:tenantInfo = "$u @ $t"
         $ui.ConnStatus.Text = "Connected: $u @ $t"
         $ui.BtnLoad.IsEnabled = $true; $ui.BtnDisconnect.IsEnabled = $true; $ui.BtnApply.IsEnabled = $true
+        $script:connected = $true
         Log "Connected as $u (tenant $t)"
+        Load-Mailboxes
     } catch { $ui.ConnStatus.Text = 'Not connected'; Log "Connect failed: $($_.Exception.Message)" }
     finally { $ui.BtnConnect.IsEnabled = $true }
 })
 
 $ui.BtnDisconnect.Add_Click({
     try { Invoke-Exo { Disconnect-ExchangeOnline -Confirm:$false; Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue } | Out-Null } catch {}
+    $script:connected = $false; $script:tenantInfo = ''
     $ui.ConnStatus.Text = 'Not connected'
     $ui.BtnLoad.IsEnabled = $false; $ui.BtnDisconnect.IsEnabled = $false; $ui.BtnApply.IsEnabled = $false
-    Log 'Disconnected.'
+    # refresh the views so no data from the disconnected tenant is left on screen
+    $mbxTable.Clear(); $ui.TargetBox.ItemsSource = $null; $ui.TargetBox.Text = ''; $ui.SelectAllBox.IsChecked = $false
+    Update-Filter
+    Log 'Disconnected; mailbox list cleared.'
 })
 
-$ui.BtnLoad.Add_Click({
+function Load-Mailboxes {
     try {
         $ui.BtnLoad.IsEnabled = $false; Log 'Loading mailboxes (large tenants can take a minute)...'
         $types = 'UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox'
@@ -251,7 +281,7 @@ $ui.BtnLoad.Add_Click({
                                    RecipientTypeDetails = [string]$_.RecipientTypeDetails; AccountDisabled = [bool]$_.AccountDisabled }
             }
         } @(,$types)
-        $mbxTable.Clear()
+        $mbxTable.Clear(); $ui.SelectAllBox.IsChecked = $false
         foreach ($u in $users | Sort-Object DisplayName) {
             $r = $mbxTable.NewRow()
             $r.Selected = $false; $r.DisplayName = $u.DisplayName; $r.UPN = $u.UserPrincipalName
@@ -263,8 +293,10 @@ $ui.BtnLoad.Add_Click({
         $ui.TargetBox.ItemsSource = @($users | Sort-Object DisplayName | ForEach-Object { "{0} ({1})" -f $_.DisplayName, $_.UserPrincipalName })
         Update-Filter; Log "Loaded $($mbxTable.Rows.Count) mailboxes."
     } catch { Log "Load failed: $($_.Exception.Message)" }
-    finally { $ui.BtnLoad.IsEnabled = $true }
-})
+    finally { $ui.BtnLoad.IsEnabled = [bool]$script:connected }
+}
+
+$ui.BtnLoad.Add_Click({ Load-Mailboxes })
 
 $ui.BtnAddQueue.Add_Click({
     $t = $ui.TargetBox.Text.Trim(); $rights = [string]$ui.RightsBox.SelectedItem

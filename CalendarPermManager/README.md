@@ -11,7 +11,7 @@ First run offers to install `ExchangeOnlineManagement` (current user scope).
 
 ## Workflow
 1. **Connect** – opens the Windows (WAM) Microsoft sign-in popup (MFA / Conditional Access work normally). The app never sees the password.
-2. **Load mailboxes**, then filter by display name / UPN, **Active users only** (account enabled), and mailbox type.
+2. Mailboxes **load automatically after Connect** (and the list is cleared on Disconnect; *Load / refresh* re-pulls it). Filter by display name / UPN, **Active users only** (account enabled), and mailbox type.
    Shared/room/equipment mailboxes show `Active = n/a` (their accounts are disabled by design) and are not excluded by the active filter.
 3. Pick the **target mailbox** (dropdown, the calendar being shared) and rights, check the **users** to grant access in the grid, then *Add checked users to queue* – or *Import CSV* with columns `Mailbox,Delegate,AccessRights`.
 4. Leave **Preview only (-WhatIf)** ticked for a dry run, then untick and **Apply queue**.
@@ -23,3 +23,5 @@ Behaviour notes
 - Requires an account with Exchange admin rights in the client tenant.
 
 Not tested on a live tenant yet (built on Linux) – run a `-WhatIf` pass on a test mailbox first.
+
+Queue: tick entries (or *Select all*) and click **Remove checked** to drop individual items; *Select all (filtered)* in the user list ticks only the rows currently shown by the filter.
