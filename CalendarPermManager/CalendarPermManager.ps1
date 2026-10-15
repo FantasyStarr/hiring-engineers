@@ -55,28 +55,39 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
       <TextBlock x:Name="ConnStatus" Text="Not connected" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="Bold"/>
     </StackPanel>
 
-    <!-- Filters -->
-    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
-      <TextBlock Text="Filter name/UPN:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-      <TextBox x:Name="FilterText" Width="220" Margin="0,0,12,0"/>
-      <CheckBox x:Name="ActiveOnly" Content="Active users only" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,0"/>
-      <TextBlock Text="Type:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-      <ComboBox x:Name="TypeFilter" Width="140" SelectedIndex="0" Margin="0,0,12,0">
-        <ComboBoxItem Content="All"/><ComboBoxItem Content="UserMailbox"/>
-        <ComboBoxItem Content="SharedMailbox"/><ComboBoxItem Content="RoomMailbox"/>
-        <ComboBoxItem Content="EquipmentMailbox"/>
-      </ComboBox>
-      <Button x:Name="BtnLoad" Content="Load / refresh mailboxes" Padding="10,4" IsEnabled="False" Margin="0,0,12,0"/>
-      <Button x:Name="BtnCheckVisible" Content="Check visible" Padding="8,4" Margin="0,0,4,0"/>
-      <Button x:Name="BtnUncheckAll" Content="Uncheck all" Padding="8,4" Margin="0,0,12,0"/>
-      <TextBlock x:Name="CountText" VerticalAlignment="Center"/>
-    </StackPanel>
-
     <!-- Grids -->
-    <Grid Grid.Row="2">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid Grid.Row="2" Grid.RowSpan="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="1.3*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
       <DockPanel Grid.Column="0">
-        <TextBlock DockPanel.Dock="Top" Text="1. Mailboxes (check the ones to grant access ON)" FontWeight="Bold" Margin="0,0,0,4"/>
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Text="1. Target mailbox (the calendar being shared)" FontWeight="Bold" Margin="0,0,0,4"/>
+          <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <TextBlock Text="Mailbox:" VerticalAlignment="Center" Margin="0,0,6,4"/>
+            <ComboBox x:Name="TargetBox" Grid.Column="1" IsEditable="True" Margin="0,0,0,4" ToolTip="Pick a mailbox or type its address"/>
+            <TextBlock Text="Rights:" Grid.Row="1" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox x:Name="RightsBox" Grid.Row="1" Grid.Column="1" SelectedIndex="6"/>
+          </Grid>
+
+          <TextBlock Text="2. Users to grant access (check them)" FontWeight="Bold" Margin="0,0,0,4"/>
+          <WrapPanel Margin="0,0,0,6">
+            <TextBlock Text="Filter name/UPN:" VerticalAlignment="Center" Margin="0,0,6,4"/>
+            <TextBox x:Name="FilterText" Width="180" Margin="0,0,10,4"/>
+            <CheckBox x:Name="ActiveOnly" Content="Active users only" IsChecked="True" VerticalAlignment="Center" Margin="0,0,10,4"/>
+            <TextBlock Text="Type:" VerticalAlignment="Center" Margin="0,0,6,4"/>
+            <ComboBox x:Name="TypeFilter" Width="130" SelectedIndex="0" Margin="0,0,10,4">
+              <ComboBoxItem Content="All"/><ComboBoxItem Content="UserMailbox"/>
+              <ComboBoxItem Content="SharedMailbox"/><ComboBoxItem Content="RoomMailbox"/>
+              <ComboBoxItem Content="EquipmentMailbox"/>
+            </ComboBox>
+            <Button x:Name="BtnLoad" Content="Load / refresh" Padding="8,3" IsEnabled="False" Margin="0,0,10,4"/>
+            <Button x:Name="BtnCheckVisible" Content="Check visible" Padding="8,3" Margin="0,0,4,4"/>
+            <Button x:Name="BtnUncheckAll" Content="Uncheck all" Padding="8,3" Margin="0,0,10,4"/>
+            <TextBlock x:Name="CountText" VerticalAlignment="Center" Margin="0,0,0,4"/>
+          </WrapPanel>
+        </StackPanel>
         <DataGrid x:Name="MbxGrid" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal">
           <DataGrid.Columns>
             <DataGridCheckBoxColumn Header="" Binding="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="30"/>
@@ -90,17 +101,8 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 
       <DockPanel Grid.Column="2">
         <StackPanel DockPanel.Dock="Top">
-          <TextBlock Text="2. Delegate + rights" FontWeight="Bold" Margin="0,0,0,4"/>
-          <Grid Margin="0,0,0,6">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-            <TextBlock Text="Delegate:" VerticalAlignment="Center" Margin="0,0,6,4"/>
-            <ComboBox x:Name="DelegateBox" Grid.Column="1" IsEditable="True" Margin="0,0,0,4"/>
-            <TextBlock Text="Rights:" Grid.Row="1" VerticalAlignment="Center" Margin="0,0,6,0"/>
-            <ComboBox x:Name="RightsBox" Grid.Row="1" Grid.Column="1" SelectedIndex="6"/>
-          </Grid>
           <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-            <Button x:Name="BtnAddQueue" Content="Add checked mailboxes to queue" Padding="10,4" Margin="0,0,6,0"/>
+            <Button x:Name="BtnAddQueue" Content="Add checked users to queue" Padding="10,4" Margin="0,0,6,0"/>
             <Button x:Name="BtnImport" Content="Import CSV" Padding="10,4" Margin="0,0,6,0"/>
             <Button x:Name="BtnClearQueue" Content="Clear queue" Padding="10,4"/>
           </StackPanel>
@@ -132,7 +134,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 $win = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
 foreach ($n in 'SignInMode','AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
-               'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','DelegateBox','RightsBox','BtnAddQueue',
+               'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','TargetBox','RightsBox','BtnAddQueue',
                'BtnImport','BtnClearQueue','QueueGrid','WhatIfBox','BtnApply','ApplyStatus','LogBox') {
     $ui[$n] = $win.FindName($n)
 }
@@ -269,19 +271,24 @@ $ui.BtnLoad.Add_Click({
             $r.Active = if ($u.RecipientTypeDetails -eq 'UserMailbox') { if ($u.AccountDisabled) {'No'} else {'Yes'} } else { 'n/a' }
             $mbxTable.Rows.Add($r)
         }
-        $ui.DelegateBox.ItemsSource = @($users | Sort-Object UserPrincipalName | ForEach-Object UserPrincipalName)
+        $ui.TargetBox.ItemsSource = @($users | Sort-Object DisplayName | ForEach-Object { "{0} ({1})" -f $_.DisplayName, $_.UserPrincipalName })
         Update-Filter; Log "Loaded $($mbxTable.Rows.Count) mailboxes."
     } catch { Log "Load failed: $($_.Exception.Message)" }
     finally { $ui.BtnLoad.IsEnabled = $true }
 })
 
 $ui.BtnAddQueue.Add_Click({
-    $d = $ui.DelegateBox.Text.Trim(); $rights = [string]$ui.RightsBox.SelectedItem
-    if (-not $d) { [void][Windows.MessageBox]::Show('Enter or pick a delegate first.'); return }
+    $t = $ui.TargetBox.Text.Trim(); $rights = [string]$ui.RightsBox.SelectedItem
+    if ($t -match '\(([^()]+)\)\s*$') { $t = $Matches[1] }   # "Name (upn)" -> upn
+    if (-not $t) { [void][Windows.MessageBox]::Show('Pick or type the target mailbox first.'); return }
     $rows = @($mbxTable.Select('Selected = true'))
-    if (-not $rows) { [void][Windows.MessageBox]::Show('Check at least one mailbox.'); return }
-    foreach ($r in $rows) { Add-ToQueue $r['UPN'] $d $rights }
-    Log "Queued $($rows.Count) entr$(if($rows.Count -eq 1){'y'}else{'ies'}) for $d ($rights)."
+    if (-not $rows) { [void][Windows.MessageBox]::Show('Check at least one user to grant access.'); return }
+    $skipped = 0
+    foreach ($r in $rows) {
+        if ($r['UPN'] -ieq $t) { $skipped++; continue }   # can't delegate a mailbox to itself
+        Add-ToQueue $t $r['UPN'] $rights
+    }
+    Log "Queued $($rows.Count - $skipped) user(s) on $t ($rights)$(if($skipped){"; skipped $skipped (same as target)"})."
 })
 
 $ui.BtnImport.Add_Click({

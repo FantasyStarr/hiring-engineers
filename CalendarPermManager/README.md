@@ -13,7 +13,7 @@ First run offers to install `ExchangeOnlineManagement` (current user scope).
 1. **Connect** – opens Microsoft's own sign-in window (MFA / Conditional Access work normally). The app never sees the password. Optionally enter the admin UPN to pre-fill.
 2. **Load mailboxes**, then filter by display name / UPN, **Active users only** (account enabled), and mailbox type.
    Shared/room/equipment mailboxes show `Active = n/a` (their accounts are disabled by design) and are not excluded by the active filter.
-3. Check mailboxes, pick a **delegate** and **rights**, click *Add checked mailboxes to queue* – or *Import CSV* with columns `Mailbox,Delegate,AccessRights`.
+3. Pick the **target mailbox** (dropdown, the calendar being shared) and rights, check the **users** to grant access in the grid, then *Add checked users to queue* – or *Import CSV* with columns `Mailbox,Delegate,AccessRights`.
 4. Leave **Preview only (-WhatIf)** ticked for a dry run, then untick and **Apply queue**.
 
 Behaviour notes
