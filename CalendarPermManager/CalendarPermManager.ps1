@@ -3,7 +3,7 @@
   Local GUI for bulk-assigning calendar permissions in a client's Microsoft 365 tenant.
 
 .DESCRIPTION
-  - Signs in with Connect-ExchangeOnline (interactive, Microsoft's own MFA window).
+  - Signs in with Connect-ExchangeOnline (interactive, Microsoft's own MFA sign-in, run in a background session so the UI stays responsive).
     This app never sees or stores the password.
   - Lists mailboxes, filterable by display name / UPN / type / active (enabled) accounts.
   - Build a queue of Mailbox -> Delegate -> AccessRights from checked mailboxes or a CSV
@@ -44,6 +44,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
       <TextBlock Text="Admin UPN (optional):" VerticalAlignment="Center" Margin="0,0,6,0"/>
       <TextBox x:Name="AdminUpn" Width="260" Margin="0,0,10,0"/>
+      <CheckBox x:Name="DeviceCode" Content="Use device code" VerticalAlignment="Center" Margin="0,0,10,0" ToolTip="Fallback if the browser sign-in does not open"/>
       <Button x:Name="BtnConnect" Content="Connect (MFA sign-in)" Padding="12,4"/>
       <Button x:Name="BtnDisconnect" Content="Disconnect" Padding="12,4" Margin="6,0,0,0" IsEnabled="False"/>
       <TextBlock x:Name="ConnStatus" Text="Not connected" VerticalAlignment="Center" Margin="12,0,0,0" FontWeight="Bold"/>
@@ -125,7 +126,7 @@ $LogPath = Join-Path $PSScriptRoot ("CalendarPerm-{0:yyyyMMdd-HHmmss}.csv" -f (G
 
 $win = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-foreach ($n in 'AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
+foreach ($n in 'DeviceCode','AdminUpn','BtnConnect','BtnDisconnect','ConnStatus','FilterText','ActiveOnly','TypeFilter','BtnLoad',
                'BtnCheckVisible','BtnUncheckAll','CountText','MbxGrid','DelegateBox','RightsBox','BtnAddQueue',
                'BtnImport','BtnClearQueue','QueueGrid','WhatIfBox','BtnApply','ApplyStatus','LogBox') {
     $ui[$n] = $win.FindName($n)
@@ -167,12 +168,26 @@ function Update-Filter {
     $ui.CountText.Text = "{0} shown / {1} loaded / {2} checked" -f $mbxTable.DefaultView.Count, $mbxTable.Rows.Count, $checked
 }
 
-function Resolve-CalendarId([string]$mailbox) {
-    # Calendar folder name is localised in some tenants, so look it up instead of assuming "Calendar".
-    $f = Get-MailboxFolderStatistics -Identity $mailbox -FolderScope Calendar -ErrorAction Stop |
-         Where-Object FolderType -eq 'Calendar' | Select-Object -First 1
-    if (-not $f) { throw "No calendar folder found for $mailbox" }
-    "{0}:{1}" -f $mailbox, ($f.FolderPath -replace '/','\')
+# All Exchange work runs in a separate MTA runspace so the UI thread never blocks
+# (interactive sign-in on the WPF thread freezes the window).
+$script:exoRs = [runspacefactory]::CreateRunspace()
+$script:exoRs.ApartmentState = 'MTA'
+$script:exoRs.Open()
+function Invoke-Exo([scriptblock]$Script, [object[]]$ArgList = @()) {
+    $ps = [powershell]::Create()
+    $ps.Runspace = $script:exoRs
+    [void]$ps.AddScript('$ErrorActionPreference = "Stop"; ' + $Script.ToString())
+    foreach ($a in $ArgList) { [void]$ps.AddArgument($a) }
+    $h = $ps.BeginInvoke(); $seen = 0
+    try {
+        while (-not $h.IsCompleted) {
+            DoEvents; Start-Sleep -Milliseconds 40
+            # surface Write-Host output (e.g. device-code instructions)
+            while ($seen -lt $ps.Streams.Information.Count) { Log ([string]$ps.Streams.Information[$seen].MessageData); $seen++ }
+        }
+        while ($seen -lt $ps.Streams.Information.Count) { Log ([string]$ps.Streams.Information[$seen].MessageData); $seen++ }
+        $ps.EndInvoke($h)
+    } finally { $ps.Dispose() }
 }
 
 function Add-ToQueue($mailbox,$delegate,$rights) {
@@ -190,26 +205,38 @@ $ui.BtnUncheckAll.Add_Click({ foreach ($r in $mbxTable.Rows) { $r['Selected'] = 
 
 $ui.BtnConnect.Add_Click({
     try {
-        if (-not (Get-Module -ListAvailable ExchangeOnlineManagement)) {
+        $ui.BtnConnect.IsEnabled = $false
+        $ui.ConnStatus.Text = 'Signing in... complete the Microsoft sign-in (browser window)'
+        Log 'Checking ExchangeOnlineManagement module...'
+        $have = Invoke-Exo { [bool](Get-Module -ListAvailable ExchangeOnlineManagement) }
+        if (-not $have) {
             $a = [Windows.MessageBox]::Show('ExchangeOnlineManagement module not found. Install it for the current user now?','Missing module','YesNo')
-            if ($a -ne 'Yes') { return }
+            if ($a -ne 'Yes') { $ui.ConnStatus.Text = 'Not connected'; return }
             Log 'Installing ExchangeOnlineManagement...'
-            Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber
+            Invoke-Exo { Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber } | Out-Null
         }
-        Import-Module ExchangeOnlineManagement -ErrorAction Stop
-        $ui.ConnStatus.Text = 'Signing in... complete the Microsoft window'; DoEvents
-        $p = @{ ShowBanner = $false }
-        if ($ui.AdminUpn.Text.Trim()) { $p.UserPrincipalName = $ui.AdminUpn.Text.Trim() }
-        Connect-ExchangeOnline @p
-        $info = Get-ConnectionInformation | Select-Object -First 1
-        $ui.ConnStatus.Text = "Connected: $($info.UserPrincipalName) @ $($info.TenantID)"
+        Log 'Opening sign-in...'
+        $info = Invoke-Exo {
+            param($upn, $device)
+            Import-Module ExchangeOnlineManagement
+            $p = @{ ShowBanner = $false }
+            if ($upn) { $p.UserPrincipalName = $upn }
+            if ($device) { $p.Device = $true }
+            elseif ((Get-Command Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM')) { $p.DisableWAM = $true }
+            Connect-ExchangeOnline @p
+            $c = Get-ConnectionInformation | Select-Object -First 1
+            "$($c.UserPrincipalName)|$($c.TenantID)"
+        } @($ui.AdminUpn.Text.Trim(), [bool]$ui.DeviceCode.IsChecked)
+        $u,$t = ([string]($info | Select-Object -Last 1)) -split '\|'
+        $ui.ConnStatus.Text = "Connected: $u @ $t"
         $ui.BtnLoad.IsEnabled = $true; $ui.BtnDisconnect.IsEnabled = $true; $ui.BtnApply.IsEnabled = $true
-        Log "Connected as $($info.UserPrincipalName) (tenant $($info.TenantID))"
+        Log "Connected as $u (tenant $t)"
     } catch { $ui.ConnStatus.Text = 'Not connected'; Log "Connect failed: $($_.Exception.Message)" }
+    finally { $ui.BtnConnect.IsEnabled = $true }
 })
 
 $ui.BtnDisconnect.Add_Click({
-    try { Disconnect-ExchangeOnline -Confirm:$false } catch {}
+    try { Invoke-Exo { Disconnect-ExchangeOnline -Confirm:$false } | Out-Null } catch {}
     $ui.ConnStatus.Text = 'Not connected'
     $ui.BtnLoad.IsEnabled = $false; $ui.BtnDisconnect.IsEnabled = $false; $ui.BtnApply.IsEnabled = $false
     Log 'Disconnected.'
@@ -220,8 +247,13 @@ $ui.BtnLoad.Add_Click({
         $ui.BtnLoad.IsEnabled = $false; Log 'Loading mailboxes (large tenants can take a minute)...'
         $types = 'UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox'
         # Get-User carries AccountDisabled, so one call gives name + active state.
-        $users = Get-User -ResultSize Unlimited -RecipientTypeDetails $types |
-                 Select-Object DisplayName, UserPrincipalName, RecipientTypeDetails, AccountDisabled
+        $users = Invoke-Exo {
+            param($types)
+            Get-User -ResultSize Unlimited -RecipientTypeDetails $types | ForEach-Object {
+                [pscustomobject]@{ DisplayName = [string]$_.DisplayName; UserPrincipalName = [string]$_.UserPrincipalName
+                                   RecipientTypeDetails = [string]$_.RecipientTypeDetails; AccountDisabled = [bool]$_.AccountDisabled }
+            }
+        } @(,$types)
         $mbxTable.Clear()
         foreach ($u in $users | Sort-Object DisplayName) {
             $r = $mbxTable.NewRow()
@@ -274,13 +306,20 @@ $ui.BtnApply.Add_Click({
     foreach ($row in $queueTable.Rows) {
         $i++; $ui.ApplyStatus.Text = "Processing $i / $n"; DoEvents
         try {
-            $id = Resolve-CalendarId $row.Mailbox
-            $existing = $null
-            try { $existing = Get-MailboxFolderPermission -Identity $id -User $row.Delegate -ErrorAction Stop } catch {}
-            $p = @{ Identity = $id; User = $row.Delegate; AccessRights = $row.AccessRights; ErrorAction = 'Stop'; Confirm = $false }
-            if ($whatIf) { $p.WhatIf = $true }
-            if ($existing) { Set-MailboxFolderPermission @p | Out-Null; $verb = 'Updated' }
-            else           { Add-MailboxFolderPermission @p | Out-Null; $verb = 'Added' }
+            $verb = Invoke-Exo {
+                param($mbx, $delegate, $rights, $whatIf)
+                $f = Get-MailboxFolderStatistics -Identity $mbx -FolderScope Calendar |
+                     Where-Object FolderType -eq 'Calendar' | Select-Object -First 1
+                if (-not $f) { throw "No calendar folder found for $mbx" }
+                $id = "{0}:{1}" -f $mbx, ($f.FolderPath -replace '/','\')
+                $existing = $null
+                try { $existing = Get-MailboxFolderPermission -Identity $id -User $delegate } catch {}
+                $p = @{ Identity = $id; User = $delegate; AccessRights = $rights; Confirm = $false }
+                if ($whatIf) { $p.WhatIf = $true }
+                if ($existing) { Set-MailboxFolderPermission @p | Out-Null; 'Updated' }
+                else           { Add-MailboxFolderPermission @p | Out-Null; 'Added' }
+            } @($row.Mailbox, $row.Delegate, $row.AccessRights, $whatIf)
+            $verb = [string]($verb | Select-Object -Last 1)
             $row.Status = if ($whatIf) { "WhatIf: would have $($verb.ToLower())" } else { $verb }
             $ok++
         } catch { $row.Status = 'FAILED: ' + $_.Exception.Message; $fail++ }
@@ -293,6 +332,6 @@ $ui.BtnApply.Add_Click({
     Log $ui.ApplyStatus.Text; $ui.BtnApply.IsEnabled = $true
 })
 
-$win.Add_Closing({ try { if (Get-ConnectionInformation) { Disconnect-ExchangeOnline -Confirm:$false } } catch {} })
+$win.Add_Closing({ try { Invoke-Exo { if (Get-ConnectionInformation) { Disconnect-ExchangeOnline -Confirm:$false } } | Out-Null } catch {}; try { $script:exoRs.Dispose() } catch {} })
 Update-Filter
 [void]$win.ShowDialog()
