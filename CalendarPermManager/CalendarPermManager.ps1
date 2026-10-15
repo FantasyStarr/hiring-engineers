@@ -236,6 +236,7 @@ $ui.BtnConnect.Add_Click({
             "$($c.UserPrincipalName)|$($c.TenantID)"
         } @($ui.AdminUpn.Text.Trim(), $ui.SignInMode.SelectedIndex)
         $u,$t = ([string]($info | Select-Object -Last 1)) -split '\|'
+        $script:tenantInfo = "$u @ $t"
         $ui.ConnStatus.Text = "Connected: $u @ $t"
         $ui.BtnLoad.IsEnabled = $true; $ui.BtnDisconnect.IsEnabled = $true; $ui.BtnApply.IsEnabled = $true
         Log "Connected as $u (tenant $t)"
@@ -312,7 +313,7 @@ $ui.BtnApply.Add_Click({
     $n = $queueTable.Rows.Count
     if ($n -eq 0) { [void][Windows.MessageBox]::Show('Queue is empty.'); return }
     if (-not $whatIf) {
-        $a = [Windows.MessageBox]::Show("Apply $n calendar permission change(s) to the live tenant?",'Confirm','YesNo','Warning')
+        $a = [Windows.MessageBox]::Show("Apply $n calendar permission change(s) to the LIVE tenant?`n`n$script:tenantInfo",'Confirm','YesNo','Warning')
         if ($a -ne 'Yes') { return }
     }
     $ui.BtnApply.IsEnabled = $false; $ok = 0; $fail = 0; $i = 0; $results = @()
@@ -340,6 +341,9 @@ $ui.BtnApply.Add_Click({
         $results += [pscustomobject]@{ Time=Get-Date -Format s; Mailbox=$row.Mailbox; Delegate=$row.Delegate
                                        AccessRights=$row.AccessRights; WhatIf=$whatIf; Result=$row.Status }
     }
+    # Neutralise spreadsheet formulas (=,+,-,@) in values that came from imported CSVs / tenant error text.
+    foreach ($r in $results) { foreach ($pn in 'Mailbox','Delegate','AccessRights','Result') {
+        if ("$($r.$pn)" -match '^[=+\-@\t\r]') { $r.$pn = "'" + $r.$pn } } }
     $results | Export-Csv -Path $LogPath -NoTypeInformation -Append
     $ui.ApplyStatus.Text = "Done: $ok ok, $fail failed. Log: $LogPath"
     Log $ui.ApplyStatus.Text; $ui.BtnApply.IsEnabled = $true
